@@ -3,6 +3,7 @@ local PARMS = { ... }
 local USER = ""
 local REPO = ""
 
+-- parametry mają priorytet
 if PARMS[1] then USER = PARMS[1] end
 if PARMS[2] then REPO = PARMS[2] end
 
@@ -13,11 +14,12 @@ local function file_exp(file)
 end
 
 local function getUrl(user, repo, file)
-    return "https://raw.githubusercontent.com/" .. user .. "/" .. repo .. "/main/" .. file
+    return "https://raw.githubusercontent.com/" ..
+        user .. "/" .. repo .. "/main/" .. textutils.urlEncode(file)
 end
 
-local function get(file)
-    local h = http.get(getUrl(USER, REPO, file))
+local function get(user, repo, file)
+    local h = http.get(getUrl(user, repo, file))
     if not h then error("HTTP request failed", 0) end
     local data = h.readAll()
     h.close()
@@ -45,35 +47,41 @@ local function save(file, data)
     f.close()
 end
 
-local raw = get("PAWINSTALL_DATA.txt")
-raw = raw:gsub("^\239\187\191", "")
-local program = textutils.unserialize(raw)
-if not program then error("Invalid PAWINSTALL_DATA format", 0) end
+local function download(user, repo)
+    local raw = get(user, repo, "PAWINSTALL_DATA.txt")
+    raw = raw:gsub("^\239\187\191", "") -- usuń BOM
+    local program = textutils.unserialize(raw)
+    if not program then error("Invalid PAWINSTALL_DATA format", 0) end
 
-if not fs.exists("/ProgramFiles") then
-    fs.makeDir("/ProgramFiles")
-end
-
-local appFolder = "/ProgramFiles/" .. program.programName:gsub(" ", "")
-prepareFolder(appFolder)
-
-local mainExists = false
-for i, file in ipairs(program.programFiles) do
-    if file == program.mainFile then
-        mainExists = true
+    if not fs.exists("/ProgramFiles") then
+        fs.makeDir("/ProgramFiles")
     end
-end
-if not mainExists then error("mainFile not found in programFiles", 0) end
 
-for i, file in ipairs(program.programFiles) do
-    if file_exp(file) then
-        local ok, data = pcall(get, file)
-        if not ok then error("Failed to download file: " .. file, 0) end
-        save(appFolder .. "/" .. file, data)
-    else
-        error("Unsupported file extension: " .. file, 0)
+    local appFolder = "/ProgramFiles/" .. string.lower(program.programName:gsub(" ", ""))
+    prepareFolder(appFolder)
+
+    local mainExists = false
+    for _, file in ipairs(program.programFiles) do
+        if file == program.mainFile then
+            mainExists = true
+        end
     end
+    if not mainExists then error("mainFile not found in programFiles", 0) end
+
+    for _, file in ipairs(program.programFiles) do
+        if file_exp(file) then
+            local ok, data = pcall(get, user, repo, file)
+            if not ok then error("Failed to download file: " .. file, 0) end
+            save(appFolder .. "/" .. file, data)
+        else
+            error("Unsupported file extension: " .. file, 0)
+        end
+    end
+
+    save("/" .. string.lower(program.programName) .. ".lua",
+        'local a={...}; shell.run("' .. appFolder .. "/" .. program.mainFile .. '", unpack(a))')
+
+    print("!Installation complete " .. program.programName .. " version: " .. program.version)
 end
 
-save("/" .. program.programName .. ".lua", 'local a={...}; shell.run("' .. appFolder .. "/" .. program.mainFile .. '", unpack(a))')
-print("!Installation complete " .. program.programName .. " version: " .. program.version)
+download(USER, REPO)
