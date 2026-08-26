@@ -49,7 +49,7 @@ local function save(file, data)
     f.close()
 end
 
-local function open(file, data)
+local function open(file)
     if not fs.exists(file) then
         return false
     end
@@ -163,3 +163,6 @@ local function reader(title, list_text)
         end
     end
 end
+
+
+
