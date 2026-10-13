@@ -63,6 +63,9 @@
       programFiles = {             <-- OK
         "main.lua",                <-- INVALID: trailing comma
       },                           <-- INVALID: trailing comma
+      libraries = {             <-- OK
+        "lib.lua",                <-- INVALID: trailing comma
+      },                           <-- INVALID: trailing comma
     }
 
     INSTALLATION RULES:
@@ -72,6 +75,9 @@
 
     - Installed program files go to:
         /ProgramFiles/<lowercase(programName)>
+
+    - Installed libraries files go to:
+        /Libraries
 
     - A launcher file is created at:
         /<lowercase(programName)>.lua
@@ -93,24 +99,34 @@ local PARMS = { ... }
 local USER = ""
 local REPO = ""
 
--- Command-line parameters override defaults
-if PARMS[1] then USER = PARMS[1] end
-if PARMS[2] then REPO = PARMS[2] end
 
--- Returns valid extension or false if unsupported
+if (not PARMS[1]) or (not PARMS[2]) then  
+    error("pawinstall [user] [repo]", 0)
+end
+
+USER = PARMS[1]
+REPO = PARMS[2]
+
 local function file_exp(file)
     if file:sub(#file - 3, #file) == ".txt" then return ".txt" end
     if file:sub(#file - 3, #file) == ".lua" then return ".lua" end
     return false
 end
 
--- Builds a raw.githubusercontent.com URL for a file
-local function getUrl(user, repo, file)
+
+local function getUrlLegacy(user, repo, file)
     return "https://raw.githubusercontent.com/" ..
         user .. "/" .. repo .. "/main/" .. textutils.urlEncode(file)
 end
 
--- Downloads a file from GitHub, throws on failure
+local function getUrl(user, repo, file)
+    return "https://raw.githubusercontent.com/" ..
+        user .. "/" .. repo .. "/main/" ..
+        textutils.urlEncode(file) ..
+        "?nocache=" .. tostring(os.epoch("utc"))
+end
+
+
 local function get(user, repo, file)
     local h = http.get(getUrl(user, repo, file))
     if not h then error("HTTP request failed", 0) end
@@ -122,7 +138,7 @@ local function get(user, repo, file)
     return data
 end
 
--- Ensures a clean directory (deletes if exists)
+
 local function prepareFolder(path)
     if fs.exists(path) then
         if fs.isDir(path) then
@@ -136,7 +152,7 @@ local function prepareFolder(path)
     end
 end
 
--- Writes data to a file, throws on failure
+
 local function save(file, data)
     local f = fs.open(file, "w")
     if not f then error("Cannot open file for writing", 0) end
@@ -144,26 +160,30 @@ local function save(file, data)
     f.close()
 end
 
--- Main installation routine
+
 local function download(user, repo)
 
-    -- Load and parse PAWINSTALL_DATA.txt
+    
     local raw = get(user, repo, "PAWINSTALL_DATA.txt")
     raw = raw:gsub("^\239\187\191", "") -- Remove UTF-8 BOM if present
 
     local program = textutils.unserialize(raw)
     if not program then error("Invalid PAWINSTALL_DATA format", 0) end
 
-    -- Ensure global ProgramFiles directory exists
+
     if not fs.exists("/ProgramFiles") then
         fs.makeDir("/ProgramFiles")
     end
 
-    -- Create program folder (lowercase, no spaces)
+    if not fs.exists("/Libraries") then
+        fs.makeDir("/Libraries")
+    end
+
+  
     local appFolder = "/ProgramFiles/" .. string.lower(program.programName:gsub(" ", ""))
     prepareFolder(appFolder)
 
-    -- Validate that mainFile exists in programFiles
+    
     local mainExists = false
     for _, file in ipairs(program.programFiles) do
         if file == program.mainFile then
@@ -172,26 +192,48 @@ local function download(user, repo)
     end
     if not mainExists then error("mainFile not found in programFiles", 0) end
 
-    -- Download all program files
-    for _, file in ipairs(program.programFiles) do
+    print("\ndownloading program...")
+    local progress = #program.programFiles
+    for i, file in ipairs(program.programFiles) do
+        
         if file_exp(file) then
-            -- Protected download call
+            
             local ok, data = pcall(get, user, repo, file)
             if not ok then error("Failed to download file: " .. file, 0) end
 
             save(appFolder .. "/" .. file, data)
+            print(tostring(math.ceil(i/progress*100)) .. "%" .. "installed " .. file)
         else
             error("Unsupported file extension: " .. file, 0)
         end
     end
+
+    print("\ndownloading libraries...")
+    local progress = #program.libraries
+    for i, lib in ipairs(program.libraries) do
+            
+        if file_exp(lib) then
+                
+            local ok, data = pcall(get, user, repo, lib)
+            if not ok then error("Failed to download file: " .. lib, 0) end
+
+            save("/Libraries/" .. lib, data)
+            print(tostring(math.ceil(i/progress*100)) .. "%" .. "installed " .. lib)
+        else
+            error("Unsupported file extension: " .. file, 0)
+        end
+    end
+
+
+
 
     -- Create launcher file in root directory
     save("/" .. string.lower(program.programName) .. ".lua",
         'local a={...}; shell.run("' .. appFolder .. "/" .. program.mainFile .. '", unpack(a))')
 
     -- Installation complete
-    print("!Installation complete " .. program.programName .. " version: " .. program.version)
+    print("\n!Installation complete " .. program.programName .. " version: " .. program.version)
 end
 
--- Execute installation
+
 download(USER, REPO)
