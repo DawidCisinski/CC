@@ -132,7 +132,7 @@ end
 -- INPUT
 --===========================================================
 
-function pawlib.rinput(text, info, key, pass)
+function pawlib.rinput(info, text, key, pass)
     pawlib.rwrite("blue", info)
     pawlib.rwrite("yellow", text .. key)
 
